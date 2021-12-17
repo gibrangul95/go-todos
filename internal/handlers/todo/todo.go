@@ -10,6 +10,13 @@ import (
 	valid "github.com/asaskevich/govalidator"
 )
 
+type PaginatedResponse struct {
+	Items []model.Todo
+	Count int
+	Limit int
+	Offset int
+}
+
 func CreateTodo(c *fiber.Ctx) error {
 	userId := c.Locals("id").(string)
 	todo := new(model.Todo)
@@ -17,18 +24,18 @@ func CreateTodo(c *fiber.Ctx) error {
 	err := c.BodyParser(todo)
 
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
+		return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
 	}
 
 	if !valid.IsUnixTime(strconv.Itoa(todo.DueDate)) {
-		return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Enter a valid unix timestamp", "data": err})
+		return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Enter a valid unix timestamp", "data": err})
 	}
 
 	todo.ID = uuid.New()
 	todo.Owner = uuid.Must(uuid.Parse(userId))
 	err = database.DB.Create(&todo).Error
 	if err != nil {
-		return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
+		return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
 	}
 	return c.JSON(fiber.Map{"status": "success", "message": "Created todo", "data": todo})
 }
@@ -64,20 +71,26 @@ func GetTodos(c *fiber.Ctx) error {
 
 	var todo []model.Todo
 	database.DB.Order(sortBy + " " + sortOrder).Limit(limit).Offset(offset).Where("LOWER(title) LIKE ?", search).Find(&todo, "owner = ?", userId)
-	return c.JSON(fiber.Map{"status": "success", "message": "todos Found", "data": todo})
+
+	var count int64
+	var todos []model.Todo
+	database.DB.Find(&todos, "owner = ?", userId).Count(&count)
+
+	data := PaginatedResponse{
+		Items: todo,
+		Count: int(count),
+		Limit: limit,
+		Offset: offset,
+	}
+	return c.JSON(fiber.Map{"status": "success", "message": "todos Found", "data": data})
 }
 
 func DeleteTodo(c *fiber.Ctx) error {
 	userId := c.Locals("id").(string)
 	var todo model.Todo
 	id := c.Params("todoId")
-	database.DB.Find(&todo, "id = ? AND owner = ?", id, userId)
 
-	if todo.ID == uuid.Nil {
-			return c.Status(404).JSON(fiber.Map{"status": "error", "message": "No todo present", "data": nil})
-	}
-
-	err := database.DB.Delete(&todo, "id = ? AND owner = ?", id, userId).Error
+	err := database.DB.Where("id = ? AND owner = ?", id, userId).Delete(&todo, "id = ? AND owner = ?", id, userId).Error
 
 	if err != nil {
 			return c.Status(404).JSON(fiber.Map{"status": "error", "message": "Failed to delete todo", "data": nil})
@@ -104,7 +117,7 @@ func UpdateTodoTitle(c *fiber.Ctx) error {
 	var updateTodoData updateTodo
 	err := c.BodyParser(&updateTodoData)
 	if err != nil {
-			return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
+			return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
 	}
 
 	if updateTodoData.Title != "" {
@@ -167,12 +180,12 @@ func AssignTodo(c *fiber.Ctx) error {
 	var updateTodoData updateTodo
 	err := c.BodyParser(&updateTodoData)
 	if err != nil {
-			return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
+			return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Review your input", "data": err})
 	}
 
 	if updateTodoData.AssignedTo != "" {
 		if !valid.IsEmail(updateTodoData.AssignedTo) {
-			return c.Status(500).JSON(fiber.Map{"status": "error", "message": "Invalid email address ", "data": err})
+			return c.Status(400).JSON(fiber.Map{"status": "error", "message": "Invalid email address ", "data": err})
 		}
 
 		if count := database.DB.Where(&model.User{Email: updateTodoData.AssignedTo}).First(new(model.User)).RowsAffected; count > 0 {

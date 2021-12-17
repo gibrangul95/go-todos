@@ -30,18 +30,6 @@ func CreateUser(c *fiber.Ctx) error {
 		return c.JSON(errors)
 	}
 
-	if count := database.DB.Where(&model.User{Email: u.Email}).First(new(model.User)).RowsAffected; count > 0 {
-		errors.Err, errors.Email = true, "Email is already registered"
-	}
-
-	if count := database.DB.Where(&model.User{Username: u.Username}).First(new(model.User)).RowsAffected; count > 0 {
-		errors.Err, errors.Username = true, "Username is already registered"
-	}
-
-	if errors.Err {
-		return c.JSON(errors)
-	}
-
 	password := []byte(u.Password)
 
 	hashedPassword, err := bcrypt.GenerateFromPassword(
